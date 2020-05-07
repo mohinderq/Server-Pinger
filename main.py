@@ -4,18 +4,21 @@ from time import sleep
 from datetime import datetime
 import argparse
 from telebot import TeleBot
+from contextlib import closing
+import socket
 
 
 class Host(object):
     host = None
     is_running = None
 
-    def __init__(self, host: str, timeout: int) -> type(None):
+    def __init__(self, host: str, timeout: int, port=10) -> type(None):
         self.host = host
         self.timeout = timeout
-        self.is_running = self.__ping()
+        self.port = int(port)
+        self.is_running = self.ping()
 
-    def __ping(self) -> bool:
+    def ping(self) -> bool:
         param = '-n' if platform.system().lower() == 'windows' else '-c'
         command = ['ping', param, '1', self.host]
         return call(command, stdout=PIPE) == 0
@@ -24,18 +27,28 @@ class Host(object):
         print('$$ {} {}'.format(datetime.now(), str(message)))
 
     def run(self) -> type(None):
-        self.is_running = self.__ping()
-        status_now = self.__ping()
+        self.is_running = self.ping()
+        status_now = self.ping()
         self.__log("Host {} | Connection {}".format(self.host, str(status_now)))
         if status_now is not self.is_running:
             self.is_running = status_now
             sleep(self.timeout)
-            status_after_timeout = self.__ping()
+            status_after_timeout = self.ping()
             if self.is_running is status_after_timeout:
                 self.__log('Host {} | Connection switched | Notify user'.format(self.host))
                 Notifier(self)
             else:
                 self.is_running = status_after_timeout
+
+
+class PortChecker(Host):
+
+    def ping(self) -> bool:
+        with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
+            if sock.connect_ex((self.host, self.port)) == 0:
+                return True
+            else:
+                return False
 
 
 class Notifier(object):
@@ -65,7 +78,11 @@ if __name__ == '__main__':
     hosts = []
 
     for ip in ips:
-        h = Host(ip, args.timeout)
+        if ':' in ip:
+            h, p = ip.split(':')
+            h = PortChecker(h, args.timeout, p)
+        else:
+            h = Host(ip, args.timeout)
         hosts.append(h)
 
     while True:
